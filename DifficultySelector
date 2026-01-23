@@ -1,0 +1,112 @@
+import React from 'react';
+import { Lock, Zap, Brain, Target, Shield, Crown, Sparkles } from 'lucide-react';
+
+const difficulties = [
+  {
+    id: 'rookie',
+    name: 'Rookie',
+    icon: Zap,
+    description: 'Simple reasoning, weak rebuttals',
+    color: 'bg-emerald-100 border-emerald-300 text-emerald-700',
+    activeColor: 'bg-emerald-500 border-emerald-600 text-white',
+    locked: false
+  },
+  {
+    id: 'analyst',
+    name: 'Analyst',
+    icon: Brain,
+    description: 'Structured, logical, neutral tone',
+    color: 'bg-blue-100 border-blue-300 text-blue-700',
+    activeColor: 'bg-blue-500 border-blue-600 text-white',
+    locked: false
+  },
+  {
+    id: 'challenger',
+    name: 'Challenger',
+    icon: Target,
+    description: 'Strong counters, exploits inconsistencies',
+    color: 'bg-amber-100 border-amber-300 text-amber-700',
+    activeColor: 'bg-amber-500 border-amber-600 text-white',
+    locked: false
+  },
+  {
+    id: 'veteran',
+    name: 'Veteran',
+    icon: Shield,
+    description: 'Strategic reframing, anticipates arguments',
+    color: 'bg-orange-100 border-orange-300 text-orange-700',
+    activeColor: 'bg-orange-500 border-orange-600 text-white',
+    locked: false
+  },
+  {
+    id: 'elite',
+    name: 'Elite',
+    icon: Crown,
+    description: 'High-pressure, exposes weak premises',
+    color: 'bg-rose-100 border-rose-300 text-rose-700',
+    activeColor: 'bg-rose-500 border-rose-600 text-white',
+    locked: false
+  },
+  {
+    id: 'jarvis_prime',
+    name: 'Jarvis Prime',
+    icon: Sparkles,
+    description: 'Near-perfect debating, advanced logic',
+    color: 'bg-violet-100 border-violet-300 text-violet-700',
+    activeColor: 'bg-violet-500 border-violet-600 text-white',
+    locked: true
+  }
+];
+
+export default function DifficultySelector({ selected, onSelect }) {
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-semibold text-gray-700">AI Difficulty</label>
+      <div className="grid grid-cols-2 gap-2">
+        {difficulties.map((diff) => {
+          const Icon = diff.icon;
+          const isSelected = selected === diff.id;
+          const isLocked = diff.locked;
+
+          return (
+            <button
+              key={diff.id}
+              onClick={() => !isLocked && onSelect(diff.id)}
+              disabled={isLocked}
+              className={`relative flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${
+                isLocked
+                  ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed opacity-60'
+                  : isSelected
+                    ? diff.activeColor
+                    : `${diff.color} hover:scale-[1.02]`
+              }`}
+            >
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                isSelected ? 'bg-white/20' : 'bg-white/60'
+              }`}>
+                {isLocked ? (
+                  <Lock className="w-4 h-4" />
+                ) : (
+                  <Icon className="w-4 h-4" />
+                )}
+              </div>
+              <div className="text-left flex-1 min-w-0">
+                <div className="font-semibold text-sm">{diff.name}</div>
+                <div className={`text-[10px] truncate ${isSelected ? 'text-white/80' : 'opacity-70'}`}>
+                  {diff.description}
+                </div>
+              </div>
+              {isLocked && (
+                <div className="absolute top-1 right-1">
+                  <Lock className="w-3 h-3 text-gray-400" />
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export { difficulties };
