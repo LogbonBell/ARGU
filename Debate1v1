@@ -1,0 +1,852 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Sparkles, Send, Eye, Lock, Bot, Flag, Radio, PenLine, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import ArgumentBubble, { classifyEmoji } from './ArgumentBubble';
+import JarvisAppearance from './JarvisAppearance';
+import ArgumentComments from './ArgumentComments';
+import VoiceInput from './VoiceInput';
+import { useDebateAI } from './useDebateAI';
+import { base44 } from '@/api/base44Client';
+
+export default function Debate1v1({ topic, difficulty = 'analyst', onExit }) {
+  const [phase, setPhase] = useState('reading');
+  const [round, setRound] = useState(1);
+  const [timer, setTimer] = useState(15);
+  const [userArgument, setUserArgument] = useState('');
+  const [polishUsed, setPolishUsed] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [inputLocked, setInputLocked] = useState(false);
+  const [currentTurn, setCurrentTurn] = useState('user');
+  const [showForfeitConfirm, setShowForfeitConfirm] = useState(false);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const [autoSubmittedArgs, setAutoSubmittedArgs] = useState({});
+  const [isPolishing, setIsPolishing] = useState(false);
+
+  const [userArguments, setUserArguments] = useState([]);
+  const [opponentArguments, setOpponentArguments] = useState([]);
+  const [reactions, setReactions] = useState({});
+  const [roundScores, setRoundScores] = useState([]);
+  const [scores, setScores] = useState({ user: 0, opponent: 0 });
+  const [factChecks, setFactChecks] = useState({});
+
+  // Jarvis appearance state
+  const [jarvisShow, setJarvisShow] = useState(false);
+  const [jarvisType, setJarvisType] = useState('round_start');
+  const [jarvisMessage, setJarvisMessage] = useState('');
+  const [jarvisFactCheck, setJarvisFactCheck] = useState(null);
+
+  // Comments state
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentTarget, setCommentTarget] = useState(null);
+
+  // AI Debate Engine
+  const { 
+    generateResponse, 
+    isGenerating: aiIsThinking,
+    getConversationHistory 
+  } = useDebateAI(topic, 'for', difficulty);
+
+  const maxRounds = 5;
+  const readingTime = 15;
+  const writingTime = 90;
+  const charLimit = 900;
+  const liveDelay = '1m';
+
+  const mainScrollRef = useRef(null);
+
+  // Show Jarvis at round start - brief appearance
+  useEffect(() => {
+    setJarvisType('round_start');
+    setJarvisShow(true);
+    
+    // Auto-dismiss after 2.5 seconds for round start
+    const timeout = setTimeout(() => {
+      setJarvisShow(false);
+    }, 2500);
+    
+    return () => clearTimeout(timeout);
+  }, [round]);
+
+  // Timer effect - pauses during fact-check
+  useEffect(() => {
+    if (isComplete || inputLocked || aiIsThinking || showForfeitConfirm || timerPaused) return;
+
+    const interval = setInterval(() => {
+      setTimer(prev => {
+        if (prev <= 1) {
+          if (phase === 'reading') {
+            setPhase('writing');
+            return writingTime;
+          } else {
+            handleTimeUp();
+            return 0;
+          }
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [phase, isComplete, inputLocked, aiIsThinking, showForfeitConfirm, timerPaused]);
+
+  const handleTimeUp = async () => {
+    setInputLocked(true);
+    
+    // Check for first-turn forfeit
+    if (!userArgument.trim() && round === 1 && userArguments.length === 0 && opponentArguments.length === 0) {
+      if (checkFirstTurnForfeit()) return;
+    }
+    
+    const argIndex = userArguments.length;
+    setAutoSubmittedArgs(prev => ({ ...prev, [`user-${argIndex}`]: true }));
+    
+    // Auto-submit whatever is typed OR "[No argument submitted]" if empty
+    const textToSubmit = userArgument.trim() || '[No argument submitted]';
+    
+    // Clear input immediately to prevent persistence
+    setUserArgument('');
+    setPolishUsed(false);
+    
+    // Submit with auto-submitted flag
+    await submitArgumentWithText(textToSubmit, true);
+  };
+
+  const submitArgumentWithText = async (text, isAutoSubmitted = false) => {
+    const newUserArgs = [...userArguments, text];
+    const userIdx = newUserArgs.length - 1;
+    setUserArguments(newUserArgs);
+    setCurrentTurn('opponent');
+
+    // Simulate reactions (skip for no response)
+    const isNoResponse = text === '[No response]' || text === '[No argument submitted]';
+    const userReactions = !isNoResponse ? simulateReactions('user', userIdx) : {};
+
+    // AI responds (only ONE argument per turn - prevent runaway)
+    const conversationHistory = getConversationHistory();
+    const aiResponse = await generateResponse(text, round, conversationHistory);
+
+    if (aiResponse?.text) {
+      const newOppArgs = [...opponentArguments, aiResponse.text];
+      const oppIdx = newOppArgs.length - 1;
+      setOpponentArguments(newOppArgs);
+
+      const aiReactions = simulateReactions('opponent', oppIdx);
+
+      const userRoundScore = calculateReactionScore(userReactions);
+      const aiRoundScore = calculateReactionScore(aiReactions);
+      
+      setRoundScores(prev => [...prev, { 
+        round, 
+        user: userRoundScore, 
+        opponent: aiRoundScore,
+        winner: userRoundScore > aiRoundScore ? 'user' : userRoundScore < aiRoundScore ? 'opponent' : 'tie'
+      }]);
+
+      setTimeout(() => {
+        setCurrentTurn('user');
+        moveToNextRound();
+      }, 2000);
+    } else {
+      moveToNextRound();
+    }
+
+    setInputLocked(false);
+  };
+
+  const skipReading = () => {
+    setPhase('writing');
+    setTimer(writingTime);
+  };
+
+  const submitArgument = async (isAutoSubmitted = false) => {
+    if (!userArgument.trim() || (inputLocked && !isAutoSubmitted)) return;
+
+    const textToSubmit = userArgument.trim();
+    setUserArgument('');
+    setPolishUsed(false);
+    
+    await submitArgumentWithText(textToSubmit, isAutoSubmitted);
+  };
+
+  const calculateReactionScore = (reactionObj) => {
+    let score = 0;
+    Object.entries(reactionObj).forEach(([emoji, count]) => {
+      const sentiment = classifyEmoji(emoji);
+      if (sentiment === 'positive') score += count;
+      if (sentiment === 'negative') score -= count;
+    });
+    return score;
+  };
+
+  const simulateReactions = (side, idx) => {
+    const key = `${side}-${idx}`;
+    const emojiPool = ['🔥', '💯', '👏', '❤️', '😂', '💪', '👍', '😍', '🎯', '💡', '👎', '🤡', '💩', '😡', '🙄'];
+    
+    const numEmojis = Math.floor(Math.random() * 6) + 4;
+    const selected = emojiPool.sort(() => 0.5 - Math.random()).slice(0, numEmojis);
+    
+    const newReactions = {};
+    selected.forEach(emoji => {
+      newReactions[emoji] = Math.floor(Math.random() * 20) + 1;
+    });
+    
+    setReactions(prev => ({ ...prev, [key]: newReactions }));
+
+    let change = 0;
+    Object.entries(newReactions).forEach(([emoji, count]) => {
+      const sentiment = classifyEmoji(emoji);
+      if (sentiment === 'positive') change += count;
+      if (sentiment === 'negative') change -= count;
+    });
+
+    setScores(prev => ({
+      ...prev,
+      [side]: prev[side] + change
+    }));
+
+    return newReactions;
+  };
+
+  const addReaction = (side, idx, emoji) => {
+    const key = `${side}-${idx}`;
+    setReactions(prev => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        [emoji]: (prev[key]?.[emoji] || 0) + 1
+      }
+    }));
+
+    const sentiment = classifyEmoji(emoji);
+    if (sentiment === 'positive') {
+      setScores(prev => ({ ...prev, [side]: prev[side] + 1 }));
+    } else if (sentiment === 'negative') {
+      setScores(prev => ({ ...prev, [side]: Math.max(0, prev[side] - 1) }));
+    }
+  };
+
+  const moveToNextRound = () => {
+    if (round >= maxRounds) {
+      setTimeout(() => setIsComplete(true), 1500);
+      return;
+    }
+    
+    const newRound = round + 1;
+    setRound(newRound);
+    setPhase('reading');
+    setTimer(readingTime);
+  };
+
+  const polishArgument = async () => {
+    if (polishUsed || inputLocked || !userArgument.trim() || isPolishing) return;
+    
+    setIsPolishing(true);
+    try {
+      const response = await base44.integrations.Core.InvokeLLM({
+        prompt: `Polish this debate argument for grammar, clarity, and flow ONLY.
+DO NOT change the meaning, stance, tone, or add new arguments/facts.
+Keep it concise and preserve the original intent exactly.
+
+Original argument: "${userArgument}"
+
+Return ONLY the polished argument text, nothing else.`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            polished: { type: "string" }
+          },
+          required: ["polished"]
+        }
+      });
+      
+      if (response?.polished) {
+        setUserArgument(response.polished);
+      }
+    } catch (error) {
+      // Fallback to basic polish
+      const polished = userArgument
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^./, str => str.toUpperCase())
+        .replace(/\bi\b/g, 'I');
+      setUserArgument(polished);
+    } finally {
+      setIsPolishing(false);
+      setPolishUsed(true);
+    }
+  };
+
+  const handleManualForfeit = () => {
+    setShowForfeitConfirm(true);
+  };
+
+  const [forfeitResult, setForfeitResult] = useState(null);
+
+  const confirmManualForfeit = (confirmed) => {
+    setShowForfeitConfirm(false);
+    if (confirmed) {
+      // Forfeit overrides all scoring - AI wins immediately
+      setForfeitResult('opponent');
+      setIsComplete(true);
+    }
+  };
+
+  // Check for first-turn forfeit (user submits nothing before AI has argued)
+  const checkFirstTurnForfeit = () => {
+    if (round === 1 && userArguments.length === 0 && opponentArguments.length === 0) {
+      setForfeitResult('opponent');
+      setIsComplete(true);
+      return true;
+    }
+    return false;
+  };
+
+  // Manual fact-check via context menu - PAUSES TIMERS
+  const handleFactCheck = async (side, idx, text) => {
+    const key = `${side}-${idx}`;
+    
+    // Pause all timers
+    setTimerPaused(true);
+    
+    // Show ARGUFOX doing fact-check
+    setJarvisType('fact_check');
+    setJarvisFactCheck({ status: 'checking' });
+    setJarvisShow(true);
+
+    try {
+      const response = await base44.integrations.Core.InvokeLLM({
+        prompt: `Fact-check this debate argument. Determine if it contains verifiable factual claims and if they are accurate.
+        
+Argument: "${text}"
+
+Respond with:
+- status: "verified" if claims are accurate, "disputed" if partially accurate, "incorrect" if contains false claims, or "opinion" if no factual claims
+- reason: Brief explanation of why
+- correction: If incorrect/disputed, provide the correct information`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            status: { type: "string", enum: ["verified", "disputed", "incorrect", "opinion"] },
+            reason: { type: "string" },
+            correction: { type: "string" }
+          },
+          required: ["status", "reason"]
+        }
+      });
+
+      if (response) {
+        setFactChecks(prev => ({ ...prev, [key]: response }));
+        setJarvisFactCheck(response);
+      }
+    } catch (error) {
+      setJarvisFactCheck({ status: 'opinion', reason: 'Unable to verify claims.' });
+    }
+  };
+
+  // Resume timers after fact-check dismissed
+  const handleJarvisDismiss = () => {
+    setJarvisShow(false);
+    setJarvisFactCheck(null);
+    // Resume timers only if it was a fact-check
+    if (jarvisType === 'fact_check') {
+      setTimerPaused(false);
+    }
+  };
+
+  const handleComment = (side, idx, text) => {
+    setCommentTarget({ side, idx, text });
+    setCommentsOpen(true);
+  };
+
+  // Forfeit overrides all scoring
+  const winner = forfeitResult === 'opponent' ? 'AI (Forfeit)' : 
+                 scores.user > scores.opponent ? 'You' : 
+                 scores.user < scores.opponent ? 'AI' : 'Tie';
+  const roundWins = { user: 0, opponent: 0 };
+  roundScores.forEach(rs => {
+    if (rs.winner === 'user') roundWins.user++;
+    else if (rs.winner === 'opponent') roundWins.opponent++;
+  });
+
+  // Complete Screen
+  if (isComplete && !isReplaying) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center"
+        >
+          <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-orange-400 to-amber-500 rounded-full flex items-center justify-center shadow-lg">
+            <span className="text-4xl">🏆</span>
+          </div>
+          
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Debate Complete</h2>
+          <p className="text-gray-500 mb-6">{topic}</p>
+          
+          <div className="bg-gray-50 rounded-2xl p-6 mb-6">
+            <div className="text-sm text-gray-500 mb-4">Final Score</div>
+            <div className="flex justify-center items-center gap-8">
+              <div className="text-center">
+                <div className="text-4xl font-bold text-emerald-600">{scores.user}</div>
+                <div className="text-xs text-gray-400 mt-1">You</div>
+                <div className="text-xs text-emerald-600 mt-1">{roundWins.user} rounds won</div>
+              </div>
+              <div className="text-2xl text-gray-300">vs</div>
+              <div className="text-center">
+                <div className="text-4xl font-bold text-rose-500">{scores.opponent}</div>
+                <div className="text-xs text-gray-400 mt-1 flex items-center justify-center gap-1">
+                  <Bot className="w-3 h-3" /> AI
+                </div>
+                <div className="text-xs text-rose-500 mt-1">{roundWins.opponent} rounds won</div>
+              </div>
+            </div>
+            <div className={`mt-4 py-2 px-4 rounded-full font-bold inline-block ${
+                              forfeitResult ? 'bg-rose-100 text-rose-700' : 'bg-orange-100 text-orange-700'
+                            }`}>
+                              {forfeitResult ? '🏳️ You forfeited - AI wins!' : 
+                               winner === 'Tie' ? "It's a tie!" : `${winner} won!`}
+                            </div>
+          </div>
+          
+          <div className="space-y-3">
+            <button
+              onClick={() => setIsReplaying(true)}
+              className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+            >
+              📖 Review Debate
+            </button>
+            
+            <button
+              onClick={onExit}
+              className="w-full bg-gradient-to-r from-orange-500 to-amber-500 text-white py-3 rounded-xl font-semibold hover:from-orange-600 hover:to-amber-600 transition-colors"
+            >
+              Back to Menu
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Replay Mode
+  if (isReplaying) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-50">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <button 
+              onClick={() => setIsReplaying(false)}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="font-medium">Results</span>
+            </button>
+            <div className="text-center">
+              <h1 className="font-bold text-gray-900 text-sm">{topic}</h1>
+              <div className="text-xs text-gray-500">Debate Replay</div>
+            </div>
+            <div className="w-20" />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto pb-20">
+          <div className="max-w-3xl mx-auto px-4 py-8">
+            {userArguments.map((arg, idx) => (
+              <div key={idx} className="mb-10">
+                <div className="flex items-center justify-center gap-3 mb-4">
+                  <div className="h-px flex-1 bg-gray-200" />
+                  <span className="text-xs font-bold text-gray-400 px-3 py-1 bg-gray-100 rounded-full">
+                    Round {idx + 1}
+                  </span>
+                  <div className="h-px flex-1 bg-gray-200" />
+                </div>
+                <div className="space-y-4">
+                  <div className="max-w-xl">
+                    <div className="text-xs font-semibold text-emerald-600 mb-2">You</div>
+                    <ArgumentBubble
+                      text={arg}
+                      side="user"
+                      index={idx}
+                      reactions={reactions[`user-${idx}`] || {}}
+                      factCheck={factChecks[`user-${idx}`]}
+                      readonly
+                    />
+                  </div>
+                  <div className="max-w-xl ml-auto">
+                    <div className="text-xs font-semibold text-rose-500 mb-2 text-right flex items-center gap-1 justify-end">
+                      AI ({difficulty}) <Bot className="w-3 h-3" />
+                    </div>
+                    <ArgumentBubble
+                      text={opponentArguments[idx] || ''}
+                      side="opponent"
+                      index={idx}
+                      reactions={reactions[`opponent-${idx}`] || {}}
+                      factCheck={factChecks[`opponent-${idx}`]}
+                      readonly
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Active Debate
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Jarvis Appearance */}
+      <JarvisAppearance
+        show={jarvisShow}
+        type={jarvisType}
+        round={round}
+        maxRounds={maxRounds}
+        message={jarvisMessage}
+        factCheckData={jarvisFactCheck}
+        onDismiss={handleJarvisDismiss}
+        showContinueButton={jarvisType === 'fact_check'}
+      />
+
+      {/* Argument Comments */}
+      <ArgumentComments
+        isOpen={commentsOpen}
+        onClose={() => {
+          setCommentsOpen(false);
+          setCommentTarget(null);
+        }}
+        argumentSide={commentTarget?.side}
+        argumentIndex={commentTarget?.idx}
+        argumentText={commentTarget?.text}
+      />
+
+      {/* Manual Forfeit Confirmation */}
+      <AnimatePresence>
+        {showForfeitConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              className="bg-white rounded-2xl p-6 max-w-sm w-full"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                  <Flag className="w-5 h-5 text-rose-600" />
+                </div>
+                <h3 className="font-bold text-gray-900">Forfeit Debate?</h3>
+              </div>
+              <p className="text-gray-600 text-sm mb-6">
+                Are you sure you want to forfeit? This will end the debate and count as a loss.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => confirmManualForfeit(false)}
+                  className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => confirmManualForfeit(true)}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-500 text-white font-semibold hover:bg-rose-600"
+                >
+                  Forfeit
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-40">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <button 
+            onClick={onExit}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span className="font-medium text-sm">Exit</span>
+          </button>
+          
+          <div className="text-center flex-1 px-4">
+            <h1 className="font-bold text-gray-900 text-sm truncate">{topic}</h1>
+            <div className="text-xs text-gray-500 mt-0.5">Round {round} of {maxRounds}</div>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {/* Live indicator with delay */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 rounded-full">
+              <Radio className="w-3 h-3 text-red-500 animate-pulse" />
+              <span className="text-xs text-gray-600 font-medium">Live · {liveDelay} delay</span>
+            </div>
+            
+            {/* Forfeit Button */}
+            <button
+              onClick={handleManualForfeit}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-100 hover:bg-rose-200 rounded-full text-xs font-medium text-rose-700 transition-colors"
+            >
+              <Flag className="w-3.5 h-3.5" />
+              <span>Forfeit</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Score Bar */}
+      <div className="bg-white border-b border-gray-100 px-4 py-2">
+        <div className="max-w-4xl mx-auto flex items-center justify-center gap-6">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">You</span>
+            <span className="text-lg font-bold text-emerald-600">{scores.user}</span>
+          </div>
+          <div className="text-gray-300">vs</div>
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-bold text-rose-500">{scores.opponent}</span>
+            <span className="text-xs text-gray-500">AI</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div ref={mainScrollRef} className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-4 py-6">
+          {/* Arguments - Conversation Layout */}
+          <div className="space-y-6">
+            {userArguments.map((arg, idx) => (
+              <div key={idx} className="space-y-4">
+                {idx > 0 && (
+                  <div className="flex items-center justify-center gap-3 py-2">
+                    <div className="h-px flex-1 bg-gray-200" />
+                    <span className="text-[10px] font-bold text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">
+                      Round {idx + 1}
+                    </span>
+                    <div className="h-px flex-1 bg-gray-200" />
+                  </div>
+                )}
+                
+                {/* User Argument */}
+                                  <motion.div
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="max-w-xl"
+                                  >
+                                    <div className="text-xs font-semibold text-emerald-600 mb-1.5 flex items-center gap-1.5">
+                                      <span className="w-2 h-2 bg-emerald-500 rounded-full" />
+                                      You
+                                      {autoSubmittedArgs[`user-${idx}`] && (
+                                                              <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                                                                {(arg === '[No response]' || arg === '[No argument submitted]') ? 'No argument (timed out)' : 'Auto-submitted'}
+                                                              </span>
+                                                            )}
+                                    </div>
+                                    {(arg === '[No response]' || arg === '[No argument submitted]') ? (
+                                                          <div className="bg-gray-100 border border-gray-200 rounded-2xl rounded-bl-sm p-4 text-gray-400 italic text-sm">
+                                                            No argument submitted
+                                                          </div>
+                                                        ) : (
+                                      <ArgumentBubble
+                                        text={arg}
+                                        side="user"
+                                        index={idx}
+                                        reactions={reactions[`user-${idx}`] || {}}
+                                        onAddReaction={(emoji) => addReaction('user', idx, emoji)}
+                                        onComment={() => handleComment('user', idx, arg)}
+                                        onFactCheck={() => handleFactCheck('user', idx, arg)}
+                                        factCheck={factChecks[`user-${idx}`]}
+                                      />
+                                    )}
+                                  </motion.div>
+
+                {/* AI Argument */}
+                {opponentArguments[idx] && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="max-w-xl ml-auto"
+                  >
+                    <div className="text-xs font-semibold text-rose-500 mb-1.5 flex items-center gap-1.5 justify-end">
+                      AI ({difficulty})
+                      <Bot className="w-3 h-3" />
+                    </div>
+                    <ArgumentBubble
+                      text={opponentArguments[idx]}
+                      side="opponent"
+                      index={idx}
+                      reactions={reactions[`opponent-${idx}`] || {}}
+                      onAddReaction={(emoji) => addReaction('opponent', idx, emoji)}
+                      onComment={() => handleComment('opponent', idx, opponentArguments[idx])}
+                      onFactCheck={() => handleFactCheck('opponent', idx, opponentArguments[idx])}
+                      factCheck={factChecks[`opponent-${idx}`]}
+                    />
+                  </motion.div>
+                )}
+              </div>
+            ))}
+            
+            {/* AI Thinking */}
+            {aiIsThinking && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="max-w-xl ml-auto"
+              >
+                <div className="flex items-center gap-3 p-4 bg-rose-50 rounded-2xl border border-rose-100">
+                  <div className="flex gap-1">
+                    <motion.div 
+                      className="w-2 h-2 bg-rose-400 rounded-full"
+                      animate={{ y: [0, -6, 0] }}
+                      transition={{ duration: 0.6, repeat: Infinity, delay: 0 }}
+                    />
+                    <motion.div 
+                      className="w-2 h-2 bg-rose-400 rounded-full"
+                      animate={{ y: [0, -6, 0] }}
+                      transition={{ duration: 0.6, repeat: Infinity, delay: 0.15 }}
+                    />
+                    <motion.div 
+                      className="w-2 h-2 bg-rose-400 rounded-full"
+                      animate={{ y: [0, -6, 0] }}
+                      transition={{ duration: 0.6, repeat: Infinity, delay: 0.3 }}
+                    />
+                  </div>
+                  <span className="text-sm text-rose-600 font-medium">AI is responding...</span>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Input Area with Timer */}
+      <div className="bg-white/95 backdrop-blur-lg border-t border-gray-200 p-4">
+        <div className="max-w-2xl mx-auto">
+          {phase === 'reading' && !inputLocked && !aiIsThinking && (
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-3 text-gray-500 mb-3">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 rounded-lg">
+                  <Eye className="w-4 h-4 text-blue-500" />
+                  <span className="text-sm font-medium text-blue-600">{timer}s</span>
+                </div>
+                <span className="text-sm">Reading time</span>
+              </div>
+              <button
+                onClick={skipReading}
+                className="bg-gradient-to-r from-orange-500 to-amber-500 text-white px-8 py-2.5 rounded-xl font-semibold hover:from-orange-600 hover:to-amber-600 transition-all shadow-lg"
+              >
+                Start Writing
+              </button>
+            </div>
+          )}
+
+          {phase === 'writing' && !aiIsThinking && (
+            <div className="space-y-3">
+              {/* Timer in input area */}
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${timer <= 15 ? 'bg-rose-50' : 'bg-amber-50'}`}>
+                    <PenLine className={`w-4 h-4 ${timer <= 15 ? 'text-rose-500' : 'text-amber-500'}`} />
+                    <span className={`text-sm font-bold ${timer <= 15 ? 'text-rose-600' : 'text-amber-600'}`}>{timer}s</span>
+                  </div>
+                  <span className="text-xs text-gray-400">Writing time</span>
+                </div>
+                <span className={`text-xs font-medium ${
+                  userArgument.length > charLimit * 0.8 
+                    ? userArgument.length >= charLimit ? 'text-rose-500' : 'text-orange-500'
+                    : 'text-gray-400'
+                }`}>
+                  {userArgument.length}/{charLimit}
+                </span>
+              </div>
+
+              <div className="relative">
+                    <textarea
+                      value={userArgument}
+                      onChange={(e) => !inputLocked && e.target.value.length <= charLimit && setUserArgument(e.target.value)}
+                      placeholder={inputLocked ? "Input locked..." : "Type your argument..."}
+                      disabled={inputLocked}
+                      className={`w-full p-4 pr-14 border-2 rounded-2xl focus:outline-none resize-none text-sm transition-colors ${
+                        inputLocked 
+                          ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed' 
+                          : 'border-gray-200 focus:border-orange-400'
+                      }`}
+                      rows={3}
+                    />
+                    {/* Voice Input */}
+                    <div className="absolute right-3 top-3">
+                      <VoiceInput 
+                        disabled={inputLocked}
+                        onTranscript={(text, isFinal) => {
+                          if (inputLocked) return;
+                          if (isFinal) {
+                            // Append final transcript to existing text
+                            setUserArgument(prev => {
+                              const newText = prev ? `${prev} ${text}` : text;
+                              return newText.slice(0, charLimit);
+                            });
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={polishArgument}
+                  disabled={polishUsed || !userArgument.trim() || inputLocked || isPolishing}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all ${
+                    polishUsed || !userArgument.trim() || inputLocked || isPolishing
+                      ? 'bg-gray-100 text-gray-400'
+                      : 'bg-violet-100 text-violet-700 hover:bg-violet-200'
+                  }`}
+                >
+                  {isPolishing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4" />
+                  )}
+                  {isPolishing ? 'Polishing...' : polishUsed ? 'Polished ✓' : 'Polish Argument'}
+                </button>
+
+                <button
+                  onClick={submitArgument}
+                  disabled={!userArgument.trim() || inputLocked}
+                  className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-semibold text-sm transition-all ${
+                    !userArgument.trim() || inputLocked
+                      ? 'bg-gray-200 text-gray-400'
+                      : 'bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600 shadow-lg'
+                  }`}
+                >
+                  Submit
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {aiIsThinking && (
+            <div className="text-center py-3">
+              <span className="text-sm text-rose-600 font-medium">AI is responding...</span>
+            </div>
+          )}
+
+          {inputLocked && !aiIsThinking && (
+            <div className="text-center py-3">
+              <div className="flex items-center justify-center gap-2 text-amber-600">
+                <Lock className="w-4 h-4" />
+                <span className="text-sm font-medium">Input locked</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
