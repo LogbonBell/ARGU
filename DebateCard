@@ -1,0 +1,128 @@
+import React from 'react';
+import { Heart, MessageCircle, Share2, Bookmark, Clock } from 'lucide-react';
+
+const topicColors = {
+  Tech: "bg-blue-50 text-blue-600 border-blue-100",
+  Fun: "bg-amber-50 text-amber-600 border-amber-100",
+  Culture: "bg-violet-50 text-violet-600 border-violet-100",
+  Politics: "bg-rose-50 text-rose-600 border-rose-100",
+  Sports: "bg-emerald-50 text-emerald-600 border-emerald-100",
+  Science: "bg-cyan-50 text-cyan-600 border-cyan-100",
+};
+
+export default function DebateCard({ 
+  debate, 
+  isLiked, 
+  isBookmarked, 
+  onLike, 
+  onBookmark,
+  onClick 
+}) {
+  const totalVotes = debate.forVotes + debate.againstVotes;
+  const forPercentage = totalVotes > 0 ? (debate.forVotes / totalVotes) * 100 : 50;
+
+  return (
+    <div
+      onClick={onClick}
+      className="bg-white rounded-2xl border border-gray-100 hover:border-gray-200 shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer overflow-hidden group"
+    >
+      <div className="p-5">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <span className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${topicColors[debate.topic] || topicColors.Fun}`}>
+            {debate.topic}
+          </span>
+          <div className="flex items-center gap-1.5 text-gray-400">
+            <Clock className="w-3.5 h-3.5" />
+            <span className="text-xs font-medium">{debate.timeLeft}</span>
+          </div>
+        </div>
+
+        {/* Title */}
+        <h3 className="text-lg font-semibold text-gray-900 mb-4 leading-snug group-hover:text-orange-600 transition-colors">
+          {debate.title}
+        </h3>
+
+        {/* Voting Section */}
+        <div className="space-y-3">
+          {/* Teams Display */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-2xl border border-emerald-100">
+                {debate.teams[0]}
+              </div>
+              <div className="flex-1">
+                <div className="text-xs text-gray-500 mb-0.5">For</div>
+                <div className="text-lg font-bold text-emerald-600">{debate.forVotes.toLocaleString()}</div>
+              </div>
+            </div>
+            
+            <div className="text-xs font-bold text-gray-300 tracking-wider">VS</div>
+            
+            <div className="flex-1 flex items-center gap-3 justify-end">
+              <div className="flex-1 text-right">
+                <div className="text-xs text-gray-500 mb-0.5">Against</div>
+                <div className="text-lg font-bold text-rose-500">{debate.againstVotes.toLocaleString()}</div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-rose-50 flex items-center justify-center text-2xl border border-rose-100">
+                {debate.teams[1]}
+              </div>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full transition-all duration-500"
+              style={{ width: `${forPercentage}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Action Bar */}
+      <div className="border-t border-gray-50 px-2 py-1.5 flex items-center justify-between bg-gray-50/50">
+        <button
+          onClick={(e) => { e.stopPropagation(); onLike(); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-white transition-colors"
+        >
+          <Heart 
+            className={`w-[18px] h-[18px] transition-all ${
+              isLiked ? 'fill-rose-500 text-rose-500 scale-110' : 'text-gray-400'
+            }`} 
+          />
+          <span className={`text-sm font-medium ${isLiked ? 'text-rose-500' : 'text-gray-500'}`}>
+            {isLiked ? 'Liked' : 'Like'}
+          </span>
+        </button>
+
+        <button 
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-white transition-colors"
+        >
+          <MessageCircle className="w-[18px] h-[18px] text-gray-400" />
+          <span className="text-sm font-medium text-gray-500">{debate.comments}</span>
+        </button>
+
+        <button 
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-white transition-colors"
+        >
+          <Share2 className="w-[18px] h-[18px] text-gray-400" />
+          <span className="text-sm font-medium text-gray-500">{debate.shares}</span>
+        </button>
+
+        <button
+          onClick={(e) => { e.stopPropagation(); onBookmark(); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-white transition-colors"
+        >
+          <Bookmark 
+            className={`w-[18px] h-[18px] transition-all ${
+              isBookmarked ? 'fill-orange-500 text-orange-500' : 'text-gray-400'
+            }`}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
