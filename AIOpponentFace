@@ -1,0 +1,161 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+/**
+ * AI Opponent Face - Realistic, human-like presence
+ * Represents the AI debater in the arena
+ */
+export default function AIOpponentFace({ 
+  gazeDirection = 'center', // 'left', 'center', 'right'
+  isThinking = false,
+  expression = 'neutral' // 'neutral', 'focused', 'confident'
+}) {
+  const [currentGaze, setCurrentGaze] = useState({ x: 0, y: 0 });
+  const [targetGaze, setTargetGaze] = useState({ x: 0, y: 0 });
+  const [blinkState, setBlinkState] = useState(false);
+  const animationRef = useRef(null);
+
+  // Gaze positions
+  const gazePositions = {
+    left: { x: -5, y: 0 },
+    center: { x: 0, y: 0 },
+    right: { x: 5, y: 0 },
+  };
+
+  // Expression modifiers
+  const expressions = {
+    neutral: { browRaise: 0, mouthCurve: 0 },
+    focused: { browRaise: -2, mouthCurve: 0 },
+    confident: { browRaise: 1, mouthCurve: 2 }
+  };
+
+  const expr = expressions[expression] || expressions.neutral;
+
+  // Smooth gaze animation
+  useEffect(() => {
+    const target = gazePositions[gazeDirection] || gazePositions.center;
+    setTargetGaze(target);
+  }, [gazeDirection]);
+
+  useEffect(() => {
+    const animate = () => {
+      setCurrentGaze(prev => ({
+        x: prev.x + (targetGaze.x - prev.x) * 0.06,
+        y: prev.y + (targetGaze.y - prev.y) * 0.06
+      }));
+      animationRef.current = requestAnimationFrame(animate);
+    };
+    animationRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationRef.current);
+  }, [targetGaze]);
+
+  // Natural blinking
+  useEffect(() => {
+    const blink = () => {
+      setBlinkState(true);
+      setTimeout(() => setBlinkState(false), 150);
+    };
+    
+    const interval = setInterval(() => {
+      if (Math.random() > 0.7) blink();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="relative">
+      {/* Thinking indicator */}
+      {isThinking && (
+        <div className="absolute -inset-2 rounded-full bg-rose-400/20 animate-pulse" />
+      )}
+      
+      {/* Main face container */}
+      <div className="w-14 h-14 rounded-full bg-gradient-to-br from-slate-700 via-slate-600 to-slate-800 shadow-lg flex items-center justify-center relative overflow-hidden border border-slate-500/30">
+        
+        {/* Ambient light */}
+        <div className="absolute top-0 left-1/4 w-1/2 h-3 bg-gradient-to-b from-white/15 to-transparent rounded-full blur-sm" />
+        
+        {/* Face SVG */}
+        <svg viewBox="0 0 100 100" className="w-10 h-10">
+          {/* Eyes container with gaze */}
+          <g transform={`translate(${currentGaze.x * 0.3}, ${currentGaze.y * 0.3})`}>
+            {/* Left eye */}
+            <ellipse 
+              cx="35" 
+              cy="42" 
+              rx={blinkState ? 6 : 6} 
+              ry={blinkState ? 1 : 4} 
+              fill="#1e293b" 
+            />
+            {/* Right eye */}
+            <ellipse 
+              cx="65" 
+              cy="42" 
+              rx={blinkState ? 6 : 6} 
+              ry={blinkState ? 1 : 4} 
+              fill="#1e293b" 
+            />
+            
+            {!blinkState && (
+              <>
+                {/* Left iris */}
+                <circle 
+                  cx={35 + currentGaze.x * 0.8} 
+                  cy={42} 
+                  r="2.5" 
+                  fill="#dc2626"
+                  className={isThinking ? 'animate-pulse' : ''}
+                />
+                {/* Right iris */}
+                <circle 
+                  cx={65 + currentGaze.x * 0.8} 
+                  cy={42} 
+                  r="2.5" 
+                  fill="#dc2626"
+                  className={isThinking ? 'animate-pulse' : ''}
+                />
+                
+                {/* Eye highlights */}
+                <circle cx={33 + currentGaze.x * 0.5} cy={41} r="0.8" fill="white" opacity="0.9" />
+                <circle cx={63 + currentGaze.x * 0.5} cy={41} r="0.8" fill="white" opacity="0.9" />
+              </>
+            )}
+          </g>
+          
+          {/* Eyebrows */}
+          <path 
+            d={`M26 ${36 + expr.browRaise} Q35 ${33 + expr.browRaise} 44 ${36 + expr.browRaise}`} 
+            fill="none" 
+            stroke="#475569" 
+            strokeWidth="1.5" 
+            strokeLinecap="round" 
+          />
+          <path 
+            d={`M56 ${36 + expr.browRaise} Q65 ${33 + expr.browRaise} 74 ${36 + expr.browRaise}`} 
+            fill="none" 
+            stroke="#475569" 
+            strokeWidth="1.5" 
+            strokeLinecap="round" 
+          />
+          
+          {/* Nose hint */}
+          <path d="M50 48 L50 56" fill="none" stroke="#475569" strokeWidth="0.6" opacity="0.4" />
+          
+          {/* Mouth */}
+          <path 
+            d={`M40 66 Q50 ${68 + expr.mouthCurve} 60 66`} 
+            fill="none" 
+            stroke="#64748b" 
+            strokeWidth="1.5" 
+            strokeLinecap="round" 
+          />
+        </svg>
+      </div>
+      
+      {/* Status indicator */}
+      <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-800 ${
+        isThinking ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'
+      }`} />
+    </div>
+  );
+}
