@@ -1,0 +1,205 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Mic, MicOff, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+export default function VoiceInput({ onTranscript, disabled = false }) {
+  const [isListening, setIsListening] = useState(false);
+  const [error, setError] = useState(null);
+  const recognitionRef = useRef(null);
+  const timeoutRef = useRef(null);
+
+  // Check for browser support
+  const isSupported = typeof window !== 'undefined' && 
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+
+  useEffect(() => {
+    return () => {
+      // Cleanup on unmount
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  const startListening = () => {
+    if (!isSupported || disabled) return;
+
+    setError(null);
+    
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      // Send interim results for live preview
+      if (interimTranscript) {
+        onTranscript(interimTranscript, false);
+      }
+      
+      // Send final result
+      if (finalTranscript) {
+        onTranscript(finalTranscript, true);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error === 'no-speech') {
+        // No speech detected - just stop silently
+        setIsListening(false);
+      } else if (event.error === 'not-allowed') {
+        setError('Microphone access denied');
+      } else if (event.error === 'aborted') {
+        // User stopped - no error needed
+      } else {
+        setError('Voice input failed. Try again.');
+      }
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+
+    // Auto-stop after 30 seconds of silence
+    timeoutRef.current = setTimeout(() => {
+      stopListening();
+    }, 30000);
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    setIsListening(false);
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+  // Clear error after 3 seconds
+  useEffect(() => {
+    if (error) {
+      const timeout = setTimeout(() => setError(null), 3000);
+      return () => clearTimeout(timeout);
+    }
+  }, [error]);
+
+  if (!isSupported) {
+    return null; // Don't show mic if not supported
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={toggleListening}
+        disabled={disabled}
+        className={`p-2 rounded-lg transition-all ${
+          disabled 
+            ? 'text-gray-300 cursor-not-allowed'
+            : isListening
+              ? 'text-rose-500 bg-rose-50 hover:bg-rose-100'
+              : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50'
+        }`}
+        title={isListening ? 'Stop recording' : 'Voice input'}
+      >
+        <AnimatePresence mode="wait">
+          {isListening ? (
+            <motion.div
+              key="listening"
+              initial={{ scale: 0.8 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.8 }}
+              className="relative"
+            >
+              <motion.div
+                className="absolute inset-0 bg-rose-400 rounded-full opacity-30"
+                animate={{ scale: [1, 1.5, 1] }}
+                transition={{ duration: 1, repeat: Infinity }}
+              />
+              <MicOff className="w-5 h-5 relative z-10" />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="idle"
+              initial={{ scale: 0.8 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.8 }}
+            >
+              <Mic className="w-5 h-5" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </button>
+
+      {/* Listening indicator */}
+      <AnimatePresence>
+        {isListening && (
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 5 }}
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-rose-500 text-white text-xs font-medium rounded-full whitespace-nowrap shadow-lg"
+          >
+            <div className="flex items-center gap-1.5">
+              <motion.div
+                className="w-1.5 h-1.5 bg-white rounded-full"
+                animate={{ opacity: [1, 0.3, 1] }}
+                transition={{ duration: 0.8, repeat: Infinity }}
+              />
+              Listening...
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Error message */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 5 }}
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-rose-100 text-rose-700 text-xs font-medium rounded-full whitespace-nowrap shadow-lg"
+          >
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
