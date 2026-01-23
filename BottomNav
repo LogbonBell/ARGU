@@ -1,0 +1,43 @@
+import React from 'react';
+import { MessageSquare, TrendingUp, Flame, Users, User } from 'lucide-react';
+
+const navItems = [
+  { id: 'home', icon: MessageSquare, label: 'Home' },
+  { id: 'trending', icon: TrendingUp, label: 'Trending' },
+  { id: 'live', icon: Flame, label: 'Live' },
+  { id: 'teams', icon: Users, label: 'Teams' },
+  { id: 'profile', icon: User, label: 'Profile' },
+];
+
+export default function BottomNav({ activeTab, onTabChange }) {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-100 px-2 py-1.5 z-50">
+      <div className="max-w-2xl mx-auto flex items-center justify-around">
+        {navItems.map(item => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          
+          return (
+            <button
+              key={item.id}
+              onClick={() => onTabChange(item.id)}
+              className={`flex flex-col items-center gap-0.5 py-2 px-4 rounded-xl transition-all duration-200 ${
+                isActive 
+                  ? 'text-orange-600 bg-orange-50' 
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
+              <span className={`text-[10px] font-medium ${isActive ? 'font-semibold' : ''}`}>
+                {item.label}
+              </span>
+              {item.id === 'live' && (
+                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
