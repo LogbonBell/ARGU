@@ -1,0 +1,43 @@
+import React, { useState } from 'react';
+import DebateSetup from './DebateSetup';
+import Debate1v1 from './Debate1v1';
+
+/**
+ * Main 1v1 Debate Section
+ * Handles the flow: Setup -> Active Debate -> Results
+ */
+export default function Debate1v1Section({ onExit }) {
+  const [view, setView] = useState('setup'); // 'setup' | 'debate'
+  const [debateConfig, setDebateConfig] = useState(null);
+
+  const handleStartDebate = (topic, difficulty) => {
+    setDebateConfig({ topic, difficulty });
+    setView('debate');
+  };
+
+  const handleDebateExit = () => {
+    setDebateConfig(null);
+    setView('setup');
+  };
+
+  const handleBackToHome = () => {
+    onExit();
+  };
+
+  if (view === 'debate' && debateConfig) {
+    return (
+      <Debate1v1
+        topic={debateConfig.topic}
+        difficulty={debateConfig.difficulty}
+        onExit={handleDebateExit}
+      />
+    );
+  }
+
+  return (
+    <DebateSetup
+      onStart={handleStartDebate}
+      onBack={handleBackToHome}
+    />
+  );
+}
