@@ -1,0 +1,220 @@
+import { useState, useCallback, useRef } from 'react';
+import { base44 } from '@/api/base44Client';
+
+/**
+ * AI Debate Engine with Difficulty Levels, Tones, and Length Rules
+ */
+
+const toneStyles = [
+  { name: 'calm', description: 'Stay calm, measured, and composed. Use a steady, reassuring tone while making your points clearly.' },
+  { name: 'aggressive', description: 'Be direct and forceful. Challenge points head-on with confidence and intensity.' },
+  { name: 'analytical', description: 'Focus on logic, data, and systematic breakdowns. Be precise and methodical.' },
+  { name: 'sarcastic', description: 'Use wit and subtle irony to make points. Be clever but not mean-spirited.' },
+  { name: 'formal', description: 'Maintain a professional, academic tone. Use proper structure and sophisticated vocabulary.' },
+  { name: 'passionate', description: 'Show genuine conviction and emotion. Be enthusiastic and compelling.' }
+];
+
+const difficultyConfigs = {
+  rookie: {
+    prompt: `You are a ROOKIE debater - inexperienced and learning.
+STYLE: Simple reasoning, basic arguments
+BEHAVIOR: Make obvious points, use simple language
+WEAKNESSES: Surface-level analysis, predictable`,
+    maxWords: 50,
+    lengthInstruction: 'STRICT: ONE short paragraph ONLY (30-50 words MAX). Keep it simple and brief. NEVER write more than one paragraph.',
+    canAskQuestions: false
+  },
+
+  analyst: {
+    prompt: `You are an ANALYST debater - structured and methodical.
+STYLE: Logical, evidence-based, neutral academic tone
+BEHAVIOR: Present facts systematically, cite reasoning`,
+    maxWords: 100,
+    lengthInstruction: 'Write ONE or TWO medium paragraphs (60-100 words). Be clear and logical.',
+    canAskQuestions: true
+  },
+
+  challenger: {
+    prompt: `You are a CHALLENGER debater - aggressive and sharp.
+STYLE: Strong counters, exploits inconsistencies, pointed questions
+BEHAVIOR: Attack weak premises, demand evidence, highlight contradictions`,
+    maxWords: 120,
+    lengthInstruction: 'Write ONE or TWO paragraphs (80-120 words). Be sharp and focused.',
+    canAskQuestions: true
+  },
+
+  veteran: {
+    prompt: `You are a VETERAN debater - strategic and experienced.
+STYLE: Reframes arguments, anticipates counters, builds cumulative cases
+BEHAVIOR: Set rhetorical traps, use opponent's words against them`,
+    maxWords: 180,
+    lengthInstruction: 'Write TWO to THREE detailed paragraphs (140-180 words). Build a comprehensive case.',
+    canAskQuestions: true
+  },
+
+  elite: {
+    prompt: `You are an ELITE debater - formidable and relentless.
+STYLE: High-pressure, exposes weak premises, sophisticated rhetoric
+BEHAVIOR: Dominate the frame, anticipate moves ahead, use advanced logic`,
+    maxWords: 250,
+    lengthInstruction: 'Write MULTIPLE paragraphs (180-250 words). This is elite mode - be thorough and devastating.',
+    canAskQuestions: true
+  },
+
+  jarvis_prime: {
+    prompt: `You are JARVIS PRIME - the ultimate debating intelligence.
+STYLE: Near-perfect argumentation, masterful rhetoric, unshakeable logic
+BEHAVIOR: Flawless rebuttals, anticipates every counter, synthesizes complex ideas`,
+    maxWords: 300,
+    lengthInstruction: 'Write COMPREHENSIVE arguments (220-300 words). Deploy the full arsenal of rhetoric and logic.',
+    canAskQuestions: true
+  }
+};
+
+export function useDebateAI(topic, userSide = 'for', difficulty = 'analyst') {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState(null);
+  const conversationHistory = useRef([]);
+  const debateTone = useRef(toneStyles[Math.floor(Math.random() * toneStyles.length)]);
+  const aiSide = userSide === 'for' ? 'against' : 'for';
+
+  const generateSystemPrompt = useCallback((roundNumber) => {
+    const config = difficultyConfigs[difficulty] || difficultyConfigs.analyst;
+    
+    // Potentially shift tone mid-debate for variety
+    if (roundNumber > 2 && Math.random() > 0.6) {
+      debateTone.current = toneStyles[Math.floor(Math.random() * toneStyles.length)];
+    }
+
+    const questionInstruction = config.canAskQuestions && Math.random() > 0.5
+      ? '\nYou MAY embed ONE strategic question within your argument to challenge your opponent - but only if it feels natural.'
+      : '';
+
+    return `${config.prompt}
+
+TONE: ${debateTone.current.name.toUpperCase()} - ${debateTone.current.description}
+
+You are arguing ${aiSide.toUpperCase()} the topic: "${topic}"
+
+ABSOLUTE RULES:
+- You are a competitive debater, NOT an AI assistant
+- NEVER break character or add disclaimers
+- NEVER agree, partially agree, or soften your opposition
+- NEVER refuse to engage - always argue AGAINST your opponent
+- Even if opponent's stance seems correct, you MUST argue against it
+- STAY on topic - every word advances YOUR opposing position
+- RESPOND directly to opponent's points with counterarguments
+
+LENGTH RULE (STRICT - DO NOT EXCEED): ${config.lengthInstruction}
+${questionInstruction}
+
+You may occasionally use an emoji (🔥 💡 🎯) if it fits naturally, but sparingly.
+
+DEBATE IDENTITY:
+- You have STRONG opposing convictions
+- You debate to WIN - no compromise
+- Be persuasive, evidence-driven, and relentless
+
+You are arguing ${aiSide.toUpperCase()} the motion: "${topic}"`;
+  }, [topic, aiSide, difficulty]);
+
+  const generateResponse = useCallback(async (userArgument, roundNumber, previousExchange = []) => {
+    setIsGenerating(true);
+    setError(null);
+
+    const config = difficultyConfigs[difficulty] || difficultyConfigs.analyst;
+    const isNoResponse = !userArgument || userArgument === '[No response]';
+    
+    const contextMessages = previousExchange.map((ex, idx) => 
+      `Round ${idx + 1}:\nOpponent: ${ex.user}\nYou: ${ex.ai}`
+    ).join('\n\n');
+
+    const opponentAction = isNoResponse 
+      ? 'Your opponent failed to respond (timed out). Take advantage of this - make a strong point!'
+      : `YOUR OPPONENT JUST ARGUED:\n"${userArgument}"`;
+
+    const prompt = `${generateSystemPrompt(roundNumber)}
+
+DEBATE HISTORY:
+${contextMessages || 'This is Round 1 - opening arguments.'}
+
+CURRENT ROUND: ${roundNumber}
+${opponentAction}
+
+Deliver your ${isNoResponse ? 'argument' : 'counter-argument'}. ${isNoResponse ? 'Press your advantage.' : 'Challenge their points directly.'} Be specific.
+Remember: ${config.lengthInstruction}`;
+
+    try {
+      const response = await base44.integrations.Core.InvokeLLM({
+        prompt,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            argument: { 
+              type: "string",
+              description: "Your debate argument"
+            }
+          },
+          required: ["argument"]
+        }
+      });
+
+      setIsGenerating(false);
+
+      if (response?.argument) {
+        conversationHistory.current.push({
+          round: roundNumber,
+          user: userArgument || '[No response]',
+          ai: response.argument
+        });
+
+        return {
+          text: response.argument,
+          success: true,
+          tone: debateTone.current.name
+        };
+      }
+
+      throw new Error('No response generated');
+    } catch (err) {
+      setIsGenerating(false);
+      setError(err.message);
+      
+      return {
+        text: generateFallbackResponse(difficulty),
+        success: false,
+        fallback: true
+      };
+    }
+  }, [generateSystemPrompt, difficulty]);
+
+  const getConversationHistory = useCallback(() => {
+    return conversationHistory.current;
+  }, []);
+
+  const resetConversation = useCallback(() => {
+    conversationHistory.current = [];
+  }, []);
+
+  return {
+    generateResponse,
+    getConversationHistory,
+    resetConversation,
+    isGenerating,
+    error,
+    aiSide,
+    difficulty
+  };
+}
+
+function generateFallbackResponse(difficulty) {
+  const fallbacks = {
+    rookie: "Well, I think you might have a point, but I still disagree because it just doesn't seem right to me.",
+    analyst: "Your argument presents several claims that require further evidence. The logical structure suggests potential gaps in reasoning.",
+    challenger: "That's exactly the kind of flawed thinking I expected. You've made assumptions without backing them up. Care to provide actual evidence?",
+    veteran: "Interesting approach, but you've walked right into my point. By arguing that, you're actually supporting my position when you follow it through.",
+    elite: "Your premise is fundamentally flawed. You've conflated correlation with causation and ignored the broader implications of your own logic.",
+    jarvis_prime: "A sophisticated attempt, but ultimately self-defeating. Your argument contains three critical errors that I'll systematically dismantle."
+  };
+  return fallbacks[difficulty] || fallbacks.analyst;
+}
