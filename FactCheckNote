@@ -1,0 +1,112 @@
+import React, { useState } from 'react';
+import { ChevronDown, ChevronUp, CheckCircle, AlertTriangle, XCircle, Bot } from 'lucide-react';
+
+const statusConfig = {
+  verified: {
+    icon: CheckCircle,
+    label: 'Verified',
+    bg: 'bg-emerald-50',
+    border: 'border-emerald-200',
+    text: 'text-emerald-700',
+    iconColor: 'text-emerald-500'
+  },
+  disputed: {
+    icon: AlertTriangle,
+    label: 'Disputed',
+    bg: 'bg-amber-50',
+    border: 'border-amber-200',
+    text: 'text-amber-700',
+    iconColor: 'text-amber-500'
+  },
+  incorrect: {
+    icon: XCircle,
+    label: 'Incorrect',
+    bg: 'bg-rose-50',
+    border: 'border-rose-200',
+    text: 'text-rose-700',
+    iconColor: 'text-rose-500'
+  },
+  opinion: {
+    icon: AlertTriangle,
+    label: 'Opinion (No Facts)',
+    bg: 'bg-slate-50',
+    border: 'border-slate-200',
+    text: 'text-slate-700',
+    iconColor: 'text-slate-500'
+  }
+};
+
+export default function FactCheckNote({ 
+  status, // 'verified', 'disputed', 'incorrect'
+  reason,
+  correction,
+  context
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const config = statusConfig[status] || statusConfig.opinion;
+  const Icon = config.icon;
+
+  return (
+    <div className={`mt-2 rounded-lg border ${config.border} ${config.bg} overflow-hidden`}>
+      {/* Collapsed Header */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Bot className="w-3 h-3 text-slate-400" />
+          <Icon className={`w-3.5 h-3.5 ${config.iconColor}`} />
+          <span className={`text-xs font-medium ${config.text}`}>
+            {config.label}
+          </span>
+        </div>
+        {isExpanded ? (
+          <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+        )}
+      </button>
+
+      {/* Expanded Content */}
+      {isExpanded && (
+        <div className="px-3 pb-3 space-y-2 border-t border-gray-100/50">
+          {/* Why flagged */}
+          {reason && (
+            <div className="pt-2">
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5">
+                Why flagged
+              </div>
+              <p className="text-xs text-gray-700 leading-relaxed">
+                {reason}
+              </p>
+            </div>
+          )}
+
+          {/* Correction */}
+          {correction && (
+            <div>
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5">
+                Correction
+              </div>
+              <p className="text-xs text-gray-700 leading-relaxed">
+                {correction}
+              </p>
+            </div>
+          )}
+
+          {/* Context (optional) */}
+          {context && (
+            <div>
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5">
+                Context
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                {context}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
